@@ -27,8 +27,8 @@ public class Main {
                 boolean ra = false;
                 byte z = 0;
                 byte rcode = 0;
-                short qdcount = 1;  // Update QDCOUNT to 1 as we have one question
-                short ancount = 0;
+                short qdcount = 1;
+                short ancount = 1;
                 short nscount = 0;
                 short arcount = 0;
 
@@ -47,6 +47,15 @@ public class Main {
                 buffer.put((byte) 0);  // Null byte to terminate the domain name
                 buffer.putShort((short) 1);  // Type A record
                 buffer.putShort((short) 1);  // Class IN
+
+                // Añadir la sección de respuesta
+                buffer.put(domainName.getBytes());
+                buffer.put((byte) 0);  // Byte nulo para terminar el nombre de dominio
+                buffer.putShort((short) 1);  // Tipo A de registro
+                buffer.putShort((short) 1);  // Clase IN
+                buffer.putInt(60);  // TTL de 60 segundos
+                buffer.putShort((short) 4);  // Longitud del campo RDATA es 4 bytes
+                buffer.put(new byte[]{(byte) 8, (byte) 8, (byte) 8, (byte) 8});  // IP address 8.8.8.8 codificada en formato de 4-byte
 
                 final byte[] bufResponse = new byte[buffer.position()];
                 System.arraycopy(buffer.array(), 0, bufResponse, 0, bufResponse.length);
