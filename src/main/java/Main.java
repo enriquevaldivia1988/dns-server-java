@@ -3,6 +3,8 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
@@ -33,21 +35,48 @@ public class Main {
                 byte responseFlags1 = (byte) ((qr << 7) | (opcode << 3) | (rd << 0));
                 byte responseFlags2 = (byte) ((0 << 7) | (0 << 4) | (rcode & 0x0F));
 
-                // Extraer la sección de pregunta
-                StringBuilder domainNameBuilder = new StringBuilder();
-                int length;
-                while ((length = receivedBuffer.get() & 0xFF) != 0) {
-                    if (domainNameBuilder.length() > 0) {
-                        domainNameBuilder.append('.');
+                // Extraer la sección de preguntas
+                List<byte[]> questionSections = new ArrayList<>();
+                List<String> domainNames = new ArrayList<>();
+                for (int i = 0; i < qdcount; i++) {
+                    int position = receivedBuffer.position();
+                    StringBuilder domainNameBuilder = new StringBuilder();
+                    while (true) {
+                        byte length = receivedBuffer.get();
+                        if (length == 0) break;
+                        if ((length & 0xC0) == 0xC0) { // Comprensión
+                            int offset = ((length & 0x3F) << 8) | (receivedBuffer.get() & 0xFF);
+                            ByteBuffer offsetBuffer = ByteBuffer.wrap(packet.getData(), offset, packet.getData().length - offset).order(ByteOrder.BIG_ENDIAN);
+                            while (true) {
+                                byte labelLength = offsetBuffer.get();
+                                if (labelLength == 0) break;
+                                byte[] label = new byte[labelLength];
+                                offsetBuffer.get(label);
+                                if (domainNameBuilder.length() > 0) {
+                                    domainNameBuilder.append('.');
+                                }
+                                domainNameBuilder.append(new String(label));
+                            }
+                            break;
+                        } else {
+                            byte[] label = new byte[length];
+                            receivedBuffer.get(label);
+                            if (domainNameBuilder.length() > 0) {
+                                domainNameBuilder.append('.');
+                            }
+                            domainNameBuilder.append(new String(label));
+                        }
                     }
-                    byte[] label = new byte[length];
-                    receivedBuffer.get(label);
-                    domainNameBuilder.append(new String(label));
-                }
-                String domainName = domainNameBuilder.toString();
+                    domainNames.add(domainNameBuilder.toString());
 
-                short qType = receivedBuffer.getShort();
-                short qClass = receivedBuffer.getShort();
+                    receivedBuffer.getShort(); // Tipo (debe ser 1)
+                    receivedBuffer.getShort(); // Clase (debe ser 1)
+
+                    int endPosition = receivedBuffer.position();
+                    byte[] questionSection = new byte[endPosition - position];
+                    System.arraycopy(packet.getData(), position, questionSection, 0, questionSection.length);
+                    questionSections.add(questionSection);
+                }
 
                 // Construir encabezado DNS de respuesta
                 ByteBuffer buffer = ByteBuffer.allocate(512).order(ByteOrder.BIG_ENDIAN);
@@ -55,31 +84,29 @@ public class Main {
                 buffer.put(responseFlags1);
                 buffer.put(responseFlags2);
                 buffer.putShort(qdcount);
-                buffer.putShort((short) 1);  // Una respuesta en ANCOUNT
+                buffer.putShort(qdcount);  // Responder con una respuesta por cada pregunta
                 buffer.putShort((short) 0);  // NSCOUNT
                 buffer.putShort((short) 0);  // ARCOUNT
 
-                // Añadir la sección de pregunta
-                String[] labels = domainName.split("\\.");
-                for (String label : labels) {
-                    buffer.put((byte) label.length());
-                    buffer.put(label.getBytes());
+                // Añadir la sección de preguntas
+                for (byte[] questionSection : questionSections) {
+                    buffer.put(questionSection);
                 }
-                buffer.put((byte) 0);  // Byte nulo para terminar el nombre de dominio
-                buffer.putShort(qType);  // Tipo de registro (1 para A)
-                buffer.putShort(qClass); // Clase de registro (1 para IN)
 
-                // Añadir la sección de respuesta
-                for (String label : labels) {
-                    buffer.put((byte) label.length());
-                    buffer.put(label.getBytes());
+                // Añadir la sección de respuestas
+                for (String domainName : domainNames) {
+                    String[] labels = domainName.split("\\.");
+                    for (String label : labels) {
+                        buffer.put((byte) label.length());
+                        buffer.put(label.getBytes());
+                    }
+                    buffer.put((byte) 0);  // Byte nulo para terminar el nombre de dominio
+                    buffer.putShort((short) 1);  // Tipo de registro (1 para A)
+                    buffer.putShort((short) 1);  // Clase de registro (1 para IN)
+                    buffer.putInt(60);  // TTL de 60 segundos
+                    buffer.putShort((short) 4);  // Longitud del campo RDATA es 4 bytes
+                    buffer.put(new byte[]{(byte) 8, (byte) 8, (byte) 8, (byte) 8});  // Dirección IP 8.8.8.8
                 }
-                buffer.put((byte) 0);  // Byte nulo para terminar el nombre de dominio
-                buffer.putShort(qType);  // Tipo de registro (1 para A)
-                buffer.putShort(qClass); // Clase de registro (1 para IN)
-                buffer.putInt(60);  // TTL de 60 segundos
-                buffer.putShort((short) 4);  // Longitud del campo RDATA es 4 bytes
-                buffer.put(new byte[]{(byte) 8, (byte) 8, (byte) 8, (byte) 8});  // Dirección IP 8.8.8.8
 
                 final byte[] bufResponse = new byte[buffer.position()];
                 System.arraycopy(buffer.array(), 0, bufResponse, 0, bufResponse.length);
