@@ -17,36 +17,40 @@ public class Main {
                 serverSocket.receive(packet);
                 System.out.println("Datos recibidos");
 
-                // Construir encabezado DNS
-                short ID = 1234;
-                boolean qr = true;
-                byte opcode = 0;
-                boolean aa = false;
-                boolean tc = false;
-                boolean rd = false;
-                boolean ra = false;
-                byte z = 0;
-                byte rcode = 0;
-                short qdcount = 1;
-                short ancount = 1;
-                short nscount = 0;
-                short arcount = 0;
+                // Analizar el encabezado DNS
+                ByteBuffer receivedBuffer = ByteBuffer.wrap(packet.getData()).order(ByteOrder.BIG_ENDIAN);
+                short ID = receivedBuffer.getShort();
+                byte flags1 = receivedBuffer.get();
+                byte flags2 = receivedBuffer.get();
+                short qdcount = receivedBuffer.getShort();
+                short ancount = receivedBuffer.getShort();
+                short nscount = receivedBuffer.getShort();
+                short arcount = receivedBuffer.getShort();
 
+                byte qr = 1;
+                byte opcode = (byte) ((flags1 >> 3) & 0x0F);
+                byte rd = (byte) ((flags1 >> 0) & 0x01);
+                byte rcode = (opcode == 0) ? (byte) 0 : (byte) 4;
+
+                byte responseFlags1 = (byte) ((qr << 7) | (opcode << 3) | (rd << 0));
+                byte responseFlags2 = (byte) ((0 << 7) | (0 << 4) | (rcode & 0x0F));
+
+                // Construir encabezado DNS de respuesta
                 ByteBuffer buffer = ByteBuffer.allocate(512).order(ByteOrder.BIG_ENDIAN);
                 buffer.putShort(ID);
-                buffer.put((byte) ((qr ? 1 : 0) << 7 | (opcode & 0x0F) << 3 | (aa ? 1 : 0) << 2 | (tc ? 1 : 0) << 1 | (rd ? 1 : 0)));
-                buffer.put((byte) ((ra ? 1 : 0) << 7 | (z & 0x07) << 4 | (rcode & 0x0F)));
+                buffer.put(responseFlags1);
+                buffer.put(responseFlags2);
                 buffer.putShort(qdcount);
-                buffer.putShort(ancount);
-                buffer.putShort(nscount);
-                buffer.putShort(arcount);
+                buffer.putShort((short) 1);  // Una respuesta en ANCOUNT
+                buffer.putShort((short) 0);  // NSCOUNT
+                buffer.putShort((short) 0);  // ARCOUNT
 
                 // Añadir la sección de pregunta
                 String domainName = "\u000ccodecrafters\u0002io";
                 buffer.put(domainName.getBytes());
-                buffer.put((byte) 0);  // Null byte to terminate the domain name
-                buffer.putShort((short) 1);  // Type A record
-                buffer.putShort((short) 1);  // Class IN
+                buffer.put((byte) 0);  // Byte nulo para terminar el nombre de dominio
+                buffer.putShort((short) 1);  // Tipo A de registro
+                buffer.putShort((short) 1);  // Clase IN
 
                 // Añadir la sección de respuesta
                 buffer.put(domainName.getBytes());
